@@ -1,0 +1,36 @@
+{
+  "name": "when-traceable",
+  "version": "0.2.0",
+  "main": "when.js",
+  "scripts": {
+    "test": "qunit -c when:./when.js -t tests/tests.js"
+  },
+  "author": {
+    "name": "misonou"
+  },
+  "license": "MIT",
+  "keywords": [
+    "async",
+    "promise",
+    "deferred"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/misonou/node-when-traceable.git"
+  },
+  "dependencies": {
+    "promise": "^7.1.1",
+    "traceable": "^0.2.2"
+  },
+  "devDependencies": {
+    "qunit": "^0.9.1"
+  },
+  "maintainers": [
+    {
+      "name": "misonou",
+      "email": "misonou.mirai@gmail.com"
+    }
+  ],
+  "directories": {},
+  "description": "This is an extension to the traceable package."
+}
