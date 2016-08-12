@@ -32,5 +32,5 @@
     }
   ],
   "directories": {},
-  "description": "This is an extension to the traceable package."
+  "description": "Promises/A+ solution with traceable fused that ease debugging to async code."
 }

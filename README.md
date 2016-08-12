@@ -1,6 +1,5 @@
-This is an experimental extension to the traceable package.
-
-This packge will eventually integrated to the [traceable](https://www.npmjs.com/package/traceable) package.
+This is an Promises/A+ solution with [traceable](https://www.npmjs.com/package/traceable) fused
+that ease debugging to async code.
 
 ## when
 
