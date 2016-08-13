@@ -1,6 +1,6 @@
 {
   "name": "when-traceable",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "main": "when.js",
   "scripts": {
     "test": "qunit -c when:./when.js -t tests/tests.js"

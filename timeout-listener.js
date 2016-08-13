@@ -3,13 +3,6 @@
 var EventEmitter = require('events').EventEmitter;
 var util = require('util');
 
-function error(code, message) {
-    var err = new Error(message);
-    err.code = code;
-    err.name = code;
-    return err;
-}
-
 function resetTimeout(self, t) {
     if (!self.isStopped) {
         t = t || (+new Date() + self.milliseconds);
@@ -21,14 +14,18 @@ function resetTimeout(self, t) {
     }
 }
 
-function ontimeout(self, err, source) {
+function ontimeout(self, err) {
     if (!self.isStopped) {
-        err = err || self.interceptor(error('ETIMEOUT', 'Operation timeout'));
+        if (!err) {
+            err = self.interceptor(new Error('Operation timeout'));
+            err.code = 'ETIMEOUT';
+            err.name = 'ETIMEOUT';
+        }
         self.isTimeout = true;
         self.isStopped = true;
         clearTimeout(self._handle);
         self.removeAllListeners('elapsed');
-        self.emit('timeout', err, source || self);
+        self.emit('timeout', err);
         self.emit('stop', self);
     }
 }
@@ -57,8 +54,8 @@ TimeoutListener.prototype.listen = function (other) {
     if (!self.isStopped && !other.isStopped) {
         clearTimeout(self._handle);
         self.targets.push(other);
-        other.once('timeout', function (err, source) {
-            ontimeout(self, err, source);
+        other.once('timeout', function (err) {
+            ontimeout(self, err);
         });
         other.once('stop', function () {
             self.targets.splice(self.targets.indexOf(other), 1);

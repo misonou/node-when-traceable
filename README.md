@@ -8,27 +8,9 @@ Specifically promise objects created by this library relies on the [promise](htt
 
 However for arguments that requires a promise object, any objects of Promise/A+ implementation should work.
 
+### Long stack trace
 
-### `when(fn, [onerror])`
-
-Runs the callback `fn` and returns a promise object.
-
-```javascript
-when(function (then) {
-    fs.readFile('/path/to/file', then(function (data) {
-        // something
-    }));
-});
-```
-
-The `fn` function receives a function argument `then`.
-The primary usage of `then` is to deal with Node.js callback pattern.
-
-If `then` is called with `value`, it returns a callback function that handles Node.js callback where:
-- If error is received, follow the **error handling routine** with `onerror` as *handler*.
-- Otherwise follow the **resolving routine** with `value` as *handler* and **null action** being doing nothing.
-
-> **Note**: All errors raised during asynchronous callback are all processed by the [traceable](https://www.npmjs.com/package/traceable) package
+All errors raised during asynchronous callback are all processed by the [traceable](https://www.npmjs.com/package/traceable) package
   so you can access the stack trace of the previous event loop.
 
 ```javascript
@@ -40,7 +22,7 @@ when(function (then) {
 });
 ```
 
-#### Resolving routine
+### Resolving routine
 
 With *handler* and *fulfilling value*: 
 
@@ -53,7 +35,7 @@ With *handler* and *fulfilling value*:
 - If *handler* is not `undefined` fulfill with *handler*.
 - Otherwise fulfill with *fulfilling value* or otherwise specified (**null action**).
 
-#### Error handling routine
+### Error handling routine
 
 With *handler* and *error*:
 
@@ -99,17 +81,68 @@ when(promise, function (value) {
 });
 ```
 
+It is very similar to calling `Promise#then(then, onerror)` ***except*** that
+  - `onerror` can catch any exceptions or errors from `then`; and
+  - any asynchronous subsequent exceptions or errors from `then` and `onerror`.
+
+So retry can be easily written as
+
+```javascript
+var retryCount = 0;
+when(promise, doSomething, function (err) {
+    // When retried less than 5 times
+    // run again and let the promise to follow the state again
+    // if `doSomething` fails again this error handler will be called again 
+    if (++retryCount < 5) {
+        return doSomething();
+    }
+});
+```
+
+### `when(fn, [onerror])`
+
+Runs the callback `fn` and returns a promise object.
+
+```javascript
+when(function (then) { /* do something */ });
+```
+
+The `fn` function receives a function argument `then`.
+The primary usage of `then` is to deal with Node.js callback pattern.
+
+If `then` is called with `handler`, it returns a callback function that handles Node.js callback where:
+- If error is received, follow the **error handling routine** with `onerror` as *handler*.
+- Otherwise follow the **resolving routine** with `handler` as *handler* and **null action** being doing nothing.
+
+```javascript
+// Promise fulfilled with the file size
+when(function (then) {
+    fs.stat('/path/to/file', then(function (data) {
+        return data.size;
+    }));
+});
+
+// Promise fulfilled with `fs.Stats`
+when(function (then) {
+    fs.stat('/path/to/file', then());
+});
+
+// Promise that check if the file exists and then read the file content
+when(function (then) {
+    fs.stat('/path/to/file', then(function (data) {
+        fs.readFile('/path/to/file', then());
+        // Does not return anything so the promise is not fulfilled at this time
+        // promise will be fulfilled with file content when callback of `fs.readFile` is called
+    }));
+});
+```
+
 ### `when(value, [then], [onerror])`
 
 If none of the overloads listed below matches, returns a fulfilled promise with `value`.
 `then` and `onerror` will be supplied as handlers for **resolving routine** and
 **error handling rountine**.
 
-> **Note**: It is very similar to calling `Promise#then(then, onerror)` ***except*** that
-  the `Promise#then` method returns a new promise and left the callee untouched;
-  while for `then` and `onerror` are modifiers to the resolution of the promise itself.
-  For example if exception is raised and is caught by **error handling routine**
-  which then fulfilled the promise, it had never been a rejected promise in the promise chain.
 
 ### `when(Promise, [then], [onerror])`
 
@@ -117,11 +150,10 @@ Returns a promise that wait until the given promise is fulfilled or rejected,
 and resolve the promise by **resolving routine** with the fulfilled value as *handler*.
 
 ```javascript
+// Promise fulfilled with 2
 when(promiseOne, function (value) {
     assert(value === 1);
-    return value + 1;
-}).then(function (value) {
-    assert(value === 2);  
+    return value * 2;
 });
 ```
 
@@ -136,8 +168,8 @@ To catch the sinked errors use `when.monitor`.
 
 ```javascript
 when([promiseUndefined, promiseOne, promiseTwo], function (data) {
-    assert(data.length === 3);
-    assert(data[0] === undefined);
+    assert(data.length === 3);       // Outcome array has the same length
+    assert(data[0] === undefined);   // Undefined result stay in the correct index
     assert(data[1] === 1);
     assert(data[2] === 2);
 });
@@ -213,6 +245,7 @@ returns a promise that wait until all promises are fulfilled or rejected.
 when.map([1, 2, 3], function (number) {
     return squarePromise(number);
 });
+
 // Both the immediately returned promises and the fulfilled values of the promises
 // are flatten if their elements contains arrays
 // the following promise is fulfilled with [2, 3, 1, 4, 6, 4, 6, 9, 9]
@@ -222,6 +255,7 @@ when.map([1, 2, 3], function (number) {
         squarePromise(number)
     ];
 });
+
 // Promises and values can be mixed on the map callback
 // the following promise is fulfilled with [1, 4, 3]
 when.map([1, 2, 3], function (number) {

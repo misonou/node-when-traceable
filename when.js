@@ -7,22 +7,14 @@ var TimeoutListener = require('./timeout-listener');
 
 var monitorOptions = null;
 
-function PromiseMonitor(promise, options, interceptor) {
+function PromiseMonitor(promise, options, interceptor, reject) {
     this.id = options.id + '/' + (++options.promiseCount);
     this.options = options;
-    this.promise = promise;
+    this.promise = emittify(promise);
     this.interceptor = interceptor || null;
 
-    EventEmitter.call(promise);
-    each(EventEmitter.prototype, function (i, v) {
-        promise[i] = v;
-    });
-    if (options.rejectOnTimeout) {
-        if (typeof promise.promise === 'function') {
-            promise.once('timeout', function (err) {
-                reject(promise, err);
-            });
-        }
+    if (reject && options.rejectOnTimeout) {
+        promise.once('timeout', reject);
     }
 }
 
@@ -39,6 +31,9 @@ PromiseMonitor.prototype.listen = function (promise, errorHandler, interceptor) 
             });
         }
     });
+    promise.on('uncaughtException', function (err) {
+        self.promise.emit('uncaughtException', err);
+    });
 };
 PromiseMonitor.prototype.ifPending = function (callback) {
     var pending = true;
@@ -51,6 +46,16 @@ PromiseMonitor.prototype.ifPending = function (callback) {
         }
     });
 };
+
+function emittify(obj) {
+    if (typeof obj.emit !== 'function') {
+        EventEmitter.call(obj);
+        each(EventEmitter.prototype, function (i, v) {
+            obj[i] = v;
+        });
+    }
+    return obj;
+}
 
 function fastargs() {
     var length = arguments.length;
@@ -77,9 +82,9 @@ function each(obj, callback) {
 
 function flatten(src) {
     var dst = [];
-    for (var i = 0, len = src.lengh; i < len; i++) {
+    for (var i = 0, len = src.length; i < len; i++) {
         if (Array.isArray(src[i])) {
-            for (var j = 0, src2 = src[i], len2 = src2.lengh; j < len2; j++) {
+            for (var j = 0, src2 = src[i], len2 = src2.length; j < len2; j++) {
                 if (src2[j] !== undefined && src2[j] !== null) {
                     dst[dst.length] = src2[j];
                 }
@@ -118,7 +123,7 @@ function getPromiseMonitor(obj, options, interceptor) {
     }
     var key = '_monitor' + options.id;
     if (!promise._when[key]) {
-        promise._when[key] = new PromiseMonitor(promise, options, interceptor);
+        promise._when[key] = new PromiseMonitor(promise, options, interceptor, obj.reject);
     }
     return promise._when[key];
 }
@@ -156,7 +161,18 @@ function defer() {
     return deferred;
 }
 
+function unhandledException(promise, err) {
+    if (typeof promise.emit === 'function' && promise.listeners('uncaughtException').length) {
+        promise.emit('uncaughtException', err);
+    } else {
+        when.emit('uncaughtException', err);
+    }
+}
+
 function reject(deferred, err, errorHandler, interceptor) {
+    if (deferred.state() !== 'pending') {
+        return unhandledException(deferred.promise());
+    }
     if (errorHandler) {
         if (typeof errorHandler !== 'function') {
             errorHandler = errorHandler[err.code || err] || errorHandler.default || errorHandler;
@@ -169,8 +185,18 @@ function reject(deferred, err, errorHandler, interceptor) {
             err = nerr;
             err.code = errorHandler;
             err.name = errorHandler;
-        } else if (resolveWithCallback(deferred, errorHandler, [err], arguments[2], interceptor)) {
-            return;
+        } else {
+            var wrapperHandler = function () {
+                try {
+                    return errorHandler.apply(this, arguments);
+                } catch (err) {
+                    // avoid sychronous exception calling the same error handler
+                    reject(deferred, err, null, interceptor);
+                }
+            };
+            if (resolveWithCallback(deferred, wrapperHandler, [err], null, arguments[2], interceptor)) {
+                return;
+            }
         }
     }
     if (interceptor) {
@@ -187,9 +213,6 @@ function resolveWithCallback(deferred, then, args, thisArg, errorHandler, interc
             return true;
         }
     } catch (err) {
-        if (deferred.state() !== 'pending') {
-            throw err;
-        }
         reject(deferred, err, errorHandler, interceptor);
         return true;
     }
@@ -306,13 +329,11 @@ function when(source, then, errorHandler) {
                     if (--count === 0) {
                         if (error) {
                             master.reject(error);
-                            if (typeof promise.emit === 'function') {
-                                each(result, function (i, v) {
-                                    if (v instanceof Error && v !== error) {
-                                        promise.emit('uncaughtException', v);
-                                    }
-                                });
-                            }
+                            each(result, function (i, v) {
+                                if (v instanceof Error && v !== error) {
+                                    unhandledException(promise, v);
+                                }
+                            });
                         } else {
                             master.resolve(result);
                         }
@@ -361,11 +382,11 @@ when.map = function (arr, fn, then, errorHandler) {
         throw new TypeError('The second argument must be a function.');
     }
     var i, len, promise = [];
-    for (i = 0, len = arr.lengh; i < len; i++) {
+    for (i = 0, len = arr.length; i < len; i++) {
         promise[promise.length] = fn(arr[i], i);
     }
     promise = flatten(promise);
-    for (i = 0, len = promise.lengh; i < len; i++) {
+    for (i = 0, len = promise.length; i < len; i++) {
         promise[i] = when(promise[i]);
     }
     return when(when(promise, flatten), then, errorHandler);
@@ -396,15 +417,12 @@ when.forEach = function (arr, fn, then, errorHandler) {
             return false;
         }
         return when(function () {
-            return fn(arr[index++]) || true;
+            return fn(arr[index++]), true;
         }, function (err) {
-            if (typeof promise.emit === 'function') {
-                promise.emit('uncaughtException', err);
-            }
-            return true;
+            return unhandledException(promise, err), true;
         });
     }), then, errorHandler);
     return promise;
 };
 
-module.exports = when;
+module.exports = emittify(when);
