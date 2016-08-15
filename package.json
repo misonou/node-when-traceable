@@ -1,6 +1,6 @@
 {
   "name": "when-traceable",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "main": "when.js",
   "scripts": {
     "test": "mocha tests/tests.js"
