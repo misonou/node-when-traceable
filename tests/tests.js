@@ -1,17 +1,25 @@
-/*globals when,QUnit,test,stop,start,expect,assert.ok,assert.strictEqual*/
+/*globals describe,it */
 
-var fs = require('fs');
+var assert = require('assert');
+var when = require('../when');
 var Promise = require('promise/setimmediate');
 var EventEmitter = require('events').EventEmitter;
-var err1 = new Error();
 
-function delay(fn) {
+var error = new Error();
+error.code = 'ERROR';
+var anotherError = new Error();
+anotherError.code = 'ANOTHER_ERROR';
+
+var shouldBeFulfilled = new Error('Returned promise object should be fulfilled but now rejected.');
+var shouldBeRejected = new Error('Returned promise object should be rejected but now fulfilled.');
+
+function delay(value) {
     return new Promise(function (resolve, reject) {
         setTimeout(function () {
-            try {
-                resolve(fn());
-            } catch (err) {
-                reject(err);
+            if (value instanceof Error) {
+                reject(value);
+            } else {
+                resolve(value);
             }
         }, Math.random() * 20);
     });
@@ -27,471 +35,449 @@ function nodeCallback(value, callback) {
     });
 }
 
-QUnit.module("when(callback)");
-
-test("Fulfill from Node.js callback", function (assert) {
-    //expect(1);
-    stop();
-    when(function (then) {
-        nodeCallback(true, then());
-    }).then(function (value) {
-        start();
-        assert.strictEqual(value, true);
-    }).catch(function () {
-        start();
-        assert.ok(false);
-    });
-});
-
-test("Reject from Node.js callback", function (assert) {
-    //expect(1);
-    stop();
-    when(function (then) {
-        nodeCallback(err1, then());
-    }).then(function () {
-        start();
-        assert.ok(false);
-    }).catch(function (err) {
-        start();
-        assert.strictEqual(err, err1);
-    });
-});
-
-test("Resolving routine", function (assert) {
-    //expect(5);
-    stop();
-    when(function (then) {
-        nodeCallback(true, then(function () {
-            start();
-            throw err1;
-        }));
-    }, function (err) {
-        start();
-        assert.strictEqual(err1, err, "Call error handling routine when exception raised");
-    });
-    when(function (then) {
-        nodeCallback(true, then(function () {
-            start();
-            return err1;
-        }));
-    }, function (err) {
-        start();
-        assert.strictEqual(err1, err, "Call error handling routine when error returned");
-    });
-    when(function (then) {
-        nodeCallback(true, then(function () {
-            return delay(function () {
-                return false;
-            });
-        }));
-    }).then(function (value) {
-        start();
-        assert.strictEqual(value, false, "Follow state of returned promise");
-    }).catch(function () {
-        start();
-        assert.ok(false);
-    });
-    when(function (then) {
-        nodeCallback(true, then(function () {
-            return false;
-        }));
-    }).then(function (value) {
-        start();
-        assert.strictEqual(value, false, "Fulfill with returned value");
-    }).catch(function () {
-        start();
-        assert.ok(false);
-    });
-});
-
-test("Error handling routine", function (assert) {
-    //expect(5);
-    stop();
-    var err1 = new Error();
-    when(function (then) {
-        fs.readFile(__filename + '/inexist/path', then());
-    }, function () {
-    }).then(function () {
-        start();
-        assert.ok(false);
-    }).catch(function (err) {
-        start();
-        assert.ok(err.code === "ENOENT" || err.code === "ENOTDIR", "Reject with the same error");
-    });
-    when(function (then) {
-        fs.readFile(__filename + '/inexist/path', then());
-    }, function () {
-        throw err1;
-    }).then(function () {
-        start();
-        assert.ok(false);
-    }).catch(function (err) {
-        start();
-        assert.strictEqual(err, err1, "Reject with exception thrown in error handler");
-    });
-    when(function (then) {
-        fs.readFile(__filename + '/inexist/path', then());
-    }, function () {
-        return true;
-    }).then(function (value) {
-        start();
-        assert.strictEqual(value, true, "Follow resolving routine with return value");
-    }).catch(function () {
-        start();
-        assert.ok(false);
-    });
-    when(function (then) {
-        fs.readFile(__filename + '/inexist/path', then());
-    }, {
-        ENOTDIR: function () {
-            throw err1;
-        },
-        ENOENT: function () {
-            throw err1;
-        }
-    }).then(function () {
-        start();
-        assert.ok(false);
-    }).catch(function (err) {
-        start();
-        assert.strictEqual(err, err1, "Follow error handling routine after map function");
-    });
-    when(function (then) {
-        fs.readFile(__filename + '/inexist/path', then());
-    }, {
-        default: function () {
-            throw err1;
-        }
-    }).then(function () {
-        start();
-        assert.ok(false);
-    }).catch(function (err) {
-        start();
-        assert.strictEqual(err, err1, "Follow error handling routine after map function (default)");
-    });
-    var retryCount = 0;
-    function doSomething() {
-        return when(function (then) {
-            nodeCallback(err1, then());
-        });
+function assertNoThrow(done, fn) {
+    try {
+        fn.apply(assert, Array.prototype.slice.call(arguments, 2));
+    } catch (err) {
+        done(err);
     }
-    when(doSomething(), null, function () {
-        if (++retryCount < 5) {
-            return doSomething();
+}
+
+describe('when', function () {
+    describe('when(callback)', function () {
+        it('should fulfill from callback', function (done) {
+            when(function (then) {
+                nodeCallback(true, then());
+            }).then(function (value) {
+                assertNoThrow(done, assert.strictEqual, value, true);
+                done();
+            }).catch(function () {
+                done(shouldBeFulfilled);
+            });
+        });
+        it('should reject from callback', function (done) {
+            when(function (then) {
+                nodeCallback(error, then());
+            }).then(function () {
+                done(shouldBeRejected);
+            }).catch(function (err) {
+                assertNoThrow(done, assert.strictEqual, err, error);
+                done();
+            });
+        });
+    });
+    describe('when(value)', function () {
+        var obj = {};
+        it('should fulfill with object', function (done) {
+            when(obj).then(function (value) {
+                assertNoThrow(done, assert.strictEqual, value, obj);
+                done();
+            });
+        });
+        it('should fulfill with number', function (done) {
+            when(1).then(function (value) {
+                assertNoThrow(done, assert.strictEqual, value, 1);
+                done();
+            });
+        });
+        it('should fulfill with string', function (done) {
+            when('').then(function (value) {
+                assertNoThrow(done, assert.strictEqual, value, '');
+                done();
+            });
+        });
+        it('should fulfill with boolean', function (done) {
+            when(false).then(function (value) {
+                assertNoThrow(done, assert.strictEqual, value, false);
+                done();
+            });
+        });
+        it('should fulfill with undefined', function (done) {
+            when(undefined).then(function (value) {
+                assertNoThrow(done, assert.strictEqual, value, undefined);
+                done();
+            });
+        });
+        it('should fulfill with null', function (done) {
+            when(null).then(function (value) {
+                assertNoThrow(done, assert.strictEqual, value, null);
+                done();
+            });
+        });
+    });
+    describe('when(Promise)', function () {
+        it('should fulfill with the same fulfilled value', function (done) {
+            when(Promise.resolve(1)).then(function (value) {
+                assertNoThrow(done, assert.strictEqual, value, 1);
+                done();
+            }, function () {
+                done(shouldBeFulfilled);
+            });
+        });
+        it('should reject with the same reason', function (done) {
+            when(Promise.reject(error)).then(function () {
+                done(shouldBeRejected);
+            }).catch(function (err) {
+                assertNoThrow(done, assert.strictEqual, err, error);
+                done();
+            });
+        });
+        it('should return the same promise object when then, onerror, monitor is null', function (done) {
+            var promise = Promise.resolve();
+            assertNoThrow(done, assert.strictEqual, when(promise), promise, 'Return the same instance');
+            done();
+        });
+    });
+    describe('when(Array<Promise>)', function () {
+        it('should map fulfilled values in correct index', function (done) {
+            when([
+                delay(undefined),
+                delay(1),
+                delay(2),
+            ]).then(function (data) {
+                assertNoThrow(done, assert.strictEqual, data.length, 3, 'Length matches source array');
+                assertNoThrow(done, assert.ok, data[0] === undefined && data[1] === 1 && data[2] === 2, 'Undefined is kept in position');
+                done();
+            }).catch(function () {
+                done(shouldBeFulfilled);
+            });
+        });
+        it('should reject if one of the promise rejects', function (done) {
+            when([
+                delay(1),
+                delay(error),
+            ]).then(function () {
+                done(shouldBeRejected);
+            }).catch(function () {
+                done();
+            });
+        });
+    });
+    describe('when(Object<Promise>)', function () {
+        it('should map fulfilled values in correct keys', function (done) {
+            when({
+                one: delay(1),
+                two: delay(2),
+            }).then(function (data) {
+                assertNoThrow(done, assert.ok, data.one === 1 && data.two === 2);
+                done();
+            }).catch(function () {
+                done(shouldBeFulfilled);
+            });
+        });
+        it('should reject if one of the promise rejects', function (done) {
+            when({
+                one: delay(1),
+                two: delay(error),
+            }).then(function () {
+                done(shouldBeRejected);
+            }).catch(function () {
+                done();
+            });
+        });
+    });
+    describe('when(EventEmitter)', function () {
+        it('should reject when error event is emitted', function (done) {
+            var event = new EventEmitter();
+            var err = new Error();
+            when(event).then(function () {
+                done(shouldBeRejected);
+            }).catch(function (e) {
+                assertNoThrow(done, assert.strictEqual, e, err);
+                done();
+            });
+            setTimeout(function () {
+                event.emit('error', err);
+            });
+        });
+        it('should fulfill when specified event is emitted', function (done) {
+            var event = new EventEmitter();
+            when(event, 'done').then(function (value) {
+                assertNoThrow(done, assert.strictEqual, value, 1);
+                done();
+            }).catch(function () {
+                done(shouldBeFulfilled);
+            });
+            setTimeout(function () {
+                event.emit('done', 1);
+            });
+        });
+        it('should fulfill when any of specified events are emitted', function (done) {
+            var event = new EventEmitter();
+            when(event, {
+                done1: function (v) { return v; },
+                done2: function (v) { return v; }
+            }).then(function (value) {
+                assertNoThrow(done, assert.strictEqual, value, 1);
+                done();
+            }).catch(function () {
+                done(shouldBeFulfilled);
+            });
+            setTimeout(function () {
+                event.emit('done1', 1);
+            });
+            setTimeout(function () {
+                event.emit('done2', 2);
+            });
+        });
+    });
+    describe('when(Array<Function>)', function () {
+        it('should call functions in sequence', function (done) {
+            var dst = [];
+            when([
+                function () { delay(function () { dst.push(1); }); },
+                function () { delay(function () { dst.push(2); }); },
+                function () { delay(function () { dst.push(3); }); }
+            ]).then(function () {
+                assertNoThrow(done, assert.ok, dst.every(function (v, i) {
+                    return v === i + 1;
+                }));
+                done();
+            }).catch(function () {
+                done(shouldBeFulfilled);
+            });
+        });
+    });
+    describe('when(Error)', function () {
+        it('should reject with specified reason', function (done) {
+            when(error).then(function () {
+                done(shouldBeRejected);
+            }).catch(function (err) {
+                assertNoThrow(done, assert.strictEqual, err, error);
+                done();
+            });
+        });
+    });
+});
+describe('Resolving routine', function () {
+    it('should call error handling routine when exception thrown', function (done) {
+        when(function (then) {
+            nodeCallback(true, then(function () {
+                throw error;
+            }));
+        }).catch(function (err) {
+            assertNoThrow(done, assert.strictEqual, err, error);
+            done();
+        });
+    });
+    it('should call error handling routine when error returned', function (done) {
+        when(function (then) {
+            nodeCallback(true, then(function () {
+                return error;
+            }));
+        }).catch(function (err) {
+            assertNoThrow(done, assert.strictEqual, err, error);
+            done();
+        });
+    });
+    it('should follow state of returned promise', function (done) {
+        when(function (then) {
+            nodeCallback(true, then(function () {
+                return delay(false);
+            }));
+        }).then(function (value) {
+            assertNoThrow(done, assert.strictEqual, value, false);
+            done();
+        }).catch(function () {
+            done(shouldBeFulfilled);
+        });
+    });
+    it('should fulfill with returned value', function (done) {
+        when(function (then) {
+            nodeCallback(true, then(function () {
+                return false;
+            }));
+        }).then(function (value) {
+            assertNoThrow(done, assert.strictEqual, value, false);
+            done();
+        }).catch(function () {
+            done(shouldBeFulfilled);
+        });
+    });
+});
+describe('Error handling routine', function () {
+    it('should reject the same error', function (done) {
+        when(function (then) {
+            nodeCallback(error, then());
+        }).then(function () {
+            done(shouldBeRejected);
+        }).catch(function (err) {
+            assertNoThrow(done, assert.strictEqual, err, error);
+            done();
+        });
+    });
+    it('should reject with exception thrown in error handler', function (done) {
+        when(function (then) {
+            nodeCallback(error, then());
+        }, function () {
+            throw anotherError;
+        }).then(function () {
+            done(shouldBeRejected);
+        }).catch(function (err) {
+            assertNoThrow(done, assert.strictEqual, err, anotherError);
+            done();
+        });
+    });
+    it('should follow resolving routine with return value', function (done) {
+        when(function (then) {
+            nodeCallback(error, then());
+        }, function () {
+            return true;
+        }).then(function (value) {
+            assertNoThrow(done, assert.strictEqual, value, true);
+            done();
+        }).catch(function () {
+            done(shouldBeFulfilled);
+        });
+    });
+    it('should follow error handling routine after map function', function (done) {
+        when(function (then) {
+            nodeCallback(error, then());
+        }, { ERROR: function () { throw anotherError; } }).then(function () {
+            done(shouldBeRejected);
+        }).catch(function (err) {
+            assertNoThrow(done, assert.strictEqual, err, anotherError);
+            done();
+        });
+    });
+    it('should follow error handling routine after map function (default)', function (done) {
+        when(function (then) {
+            nodeCallback(error, then());
+        }, { default: function () { throw anotherError; } }).then(function () {
+            done(shouldBeRejected);
+        }).catch(function (err) {
+            assertNoThrow(done, assert.strictEqual, err, anotherError);
+            done();
+        });
+    });
+    it('should reject with the mapped code', function (done) {
+        when(function (then) {
+            nodeCallback(error, then());
+        }, { ERROR: 'ANOTHER_ERROR' }).then(function () {
+            done(shouldBeRejected);
+        }).catch(function (err) {
+            assertNoThrow(done, assert.strictEqual, 'ANOTHER_ERROR', err.code);
+            done();
+        });
+    });
+    it('should reject if no matches in map', function (done) {
+        when(function (then) {
+            nodeCallback(error, then());
+        }, { ANOTHER_ERROR: function () { throw anotherError; } }).then(function () {
+            done(shouldBeRejected);
+        }).catch(function (err) {
+            assertNoThrow(done, assert.strictEqual, err, error);
+            done();
+        });
+    });
+    it('should be able to catch subsequent errors', function (done) {
+        var retryCount = 0;
+        function doSomething() {
+            return when(function (then) {
+                nodeCallback(error, then());
+            });
         }
-    }).catch(function () {
-        start();
-        assert.strictEqual(retryCount, 5, "Error handler able to catch subsequent errors");
-    });
-});
-
-QUnit.module("when(value)");
-
-test("Return fulfilled promise", function (assert) {
-    //expect(6);
-    stop();
-    var obj = {};
-    when(obj).then(function (value) {
-        start();
-        assert.strictEqual(value, obj, "Object");
-    });
-    when(1).then(function (value) {
-        start();
-        assert.strictEqual(value, 1, "Number value");
-    });
-    when('').then(function (value) {
-        start();
-        assert.strictEqual(value, '', "String value");
-    });
-    when(false).then(function (value) {
-        start();
-        assert.strictEqual(value, false, "Boolean value");
-    });
-    when(undefined).then(function (value) {
-        start();
-        assert.strictEqual(value, undefined, "undefined");
-    });
-    when(null).then(function (value) {
-        start();
-        assert.strictEqual(value, null, "null");
-    });
-});
-
-QUnit.module("when(Promise)");
-
-test("Calling with then", function (assert) {
-    stop();
-    when(Promise.resolve(1), function (value) {
-        start();
-        assert.strictEqual(value, 1, "Argument is fulfilled value");
-    }, function () {
-        start();
-        assert.ok(false);
-    });
-});
-
-test("Calling with onerror", function (assert) {
-    stop();
-    when(Promise.reject(err1), function () {
-        start();
-        assert.ok(false);
-    }, function (err) {
-        start();
-        assert.strictEqual(err, err1, "Argument is rejected reason");
-    });
-});
-
-test("Calling without then, onerror, monitor", function (assert) {
-    var promise = Promise.resolve();
-    assert.strictEqual(when(promise), promise, "Return the same instance");
-});
-
-QUnit.module("when(Array<Promise>)");
-
-test("Values mapped with index", function (assert) {
-    stop();
-    when([
-        delay(function () { }),
-        delay(function () { return 1; }),
-        delay(function () { return 2; }),
-    ]).then(function (data) {
-        start();
-        assert.strictEqual(data.length, 3, "Length matches source array");
-        assert.ok(data[0] === undefined && data[1] === 1 && data[2] === 2, "Undefined is kept in position");
-    }).catch(function () {
-        start();
-        assert.ok(false);
-    });
-});
-
-test("Reject if one of the promise rejects", function (assert) {
-    stop();
-    when([
-        delay(function () { return 1; }),
-        delay(function () { throw new Error(); }),
-    ]).then(function () {
-        start();
-        assert.ok(false);
-    }).catch(function () {
-        start();
-        assert.ok(true);
-    });
-});
-
-QUnit.module("when(Object<Promise>)");
-
-test("Values mapped with keys", function (assert) {
-    stop();
-    when({
-        one: delay(function () { return 1; }),
-        two: delay(function () { return 2; }),
-    }).then(function (data) {
-        start();
-        assert.ok(data.one === 1 && data.two === 2);
-    }).catch(function () {
-        start();
-        assert.ok(false);
-    });
-});
-
-test("Reject if one of the promise rejects", function (assert) {
-    stop();
-    when({
-        one: delay(function () { return 1; }),
-        two: delay(function () { throw new Error(); }),
-    }).then(function () {
-        start();
-        assert.ok(false);
-    }).catch(function () {
-        start();
-        assert.ok(true);
-    });
-});
-
-QUnit.module("when(EventEmitter)");
-
-test("Reject when error event is emitted", function (assert) {
-    //expect(1);
-    stop();
-    var event = new EventEmitter();
-    var err = new Error();
-    when(event).then(function () {
-        start();
-        assert.ok(false);
-    }).catch(function (e) {
-        start();
-        assert.strictEqual(e, err);
-    });
-    setTimeout(function () {
-        event.emit('error', err);
-    });
-});
-
-test("Fulfill when specified event is emitted", function (assert) {
-    stop();
-    var event = new EventEmitter();
-    when(event, 'done').then(function (value) {
-        start();
-        assert.strictEqual(value, 1);
-    }).catch(function () {
-        start();
-        assert.ok(false);
-    });
-    setTimeout(function () {
-        event.emit('done', 1);
-    });
-});
-
-test("Fulfill when any of specified events are emitted", function (assert) {
-    stop();
-    var event = new EventEmitter();
-    when(event, {
-        done1: function (v) { return v; },
-        done2: function (v) { return v; }
-    }).then(function (value) {
-        start();
-        assert.strictEqual(value, 1);
-    }).catch(function () {
-        start();
-        assert.ok(false);
-    });
-    setTimeout(function () {
-        event.emit('done1', 1);
-    });
-    setTimeout(function () {
-        event.emit('done2', 2);
-    });
-});
-
-QUnit.module("when(Array<Function>)");
-
-test("Functions called in sequence", function (assert) {
-    stop();
-    var dst = [];
-    when([
-        function () { delay(function () { dst.push(1); }); },
-        function () { delay(function () { dst.push(2); }); },
-        function () { delay(function () { dst.push(3); }); }
-    ]).then(function () {
-        start();
-        assert.ok(dst.every(function (v, i) {
-            return v === i + 1;
-        }));
-    }).catch(function () {
-        start();
-        assert.ok(false);
-    });
-});
-
-QUnit.module("when(Error)");
-
-test("Return rejected promise with same reason", function (assert) {
-    stop();
-    when(err1).then(function () {
-        start();
-        assert.ok(false);
-    }).catch(function (err) {
-        start();
-        assert.strictEqual(err, err1);
-    });
-});
-
-QUnit.module("when.map");
-
-test("Values mapped in sequence", function (assert) {
-    stop();
-    var src = [1, 2, 3];
-    when.map(src, function (value) {
-        return delay(function () {
-            return value * 10;
+        when(doSomething(), null, function () {
+            if (++retryCount < 5) {
+                return doSomething();
+            }
+        }).catch(function () {
+            assertNoThrow(done, assert.strictEqual, retryCount, 5);
+            done();
         });
-    }).then(function (dst) {
-        start();
-        assert.ok(dst.every(function (v, i) {
-            return v === src[i] * 10;
-        }));
-    }).catch(function () {
-        start();
-        assert.ok(false);
     });
 });
-
-test("Result array is flattened", function (assert) {
-    stop();
-    var src = [1, 2, 3];
-    when.map(src, function (value) {
-        return [when(value), when([value, value])];
-    }).then(function (dst) {
-        start();
-        assert.strictEqual(dst.length, 9);
-    }).catch(function () {
-        start();
-        assert.ok(false);
-    });
-});
-
-QUnit.module("when.forEach");
-
-test("Callback fired in sequence", function (assert) {
-    stop();
-    var src = [{}, {}, {}];
-    var dst = [];
-    when.forEach(src, function (value) {
-        return delay(function () {
-            dst.push(value);
+describe('when.map', function () {
+    it('should map values in sequence', function (done) {
+        var src = [1, 2, 3];
+        when.map(src, function (value) {
+            return delay(value * 10);
+        }).then(function (dst) {
+            assertNoThrow(done, assert.ok, dst.every(function (v, i) {
+                return v === src[i] * 10;
+            }));
+            done();
+        }).catch(function () {
+            done(shouldBeFulfilled);
         });
-    }).then(function () {
-        start();
-        assert.ok(dst.every(function (v, i) {
-            return v === src[i];
-        }));
-    }).catch(function () {
-        start();
-        assert.ok(false);
+    });
+    it('should return flattened array', function (done) {
+        var src = [1, 2, 3];
+        when.map(src, function (value) {
+            return [when(value), when([value, value])];
+        }).then(function (dst) {
+            assertNoThrow(done, assert.strictEqual, dst.length, 9);
+            done();
+        }).catch(function () {
+            done(shouldBeFulfilled);
+        });
     });
 });
-
-QUnit.module("when.while");
-
-test("Run callback until condition false", function (assert) {
-    stop();
-    var count = 9;
-    var str = '';
-    when.while(function () {
-        return delay(function () {
+describe('when.forEach', function () {
+    it('should run callback for each element in sequence', function (done) {
+        var src = [{}, {}, {}];
+        var dst = [];
+        when.forEach(src, function (value) {
+            return delay(value);
+        }).then(function () {
+            assertNoThrow(done, assert.ok, dst.every(function (v, i) {
+                return v === src[i];
+            }));
+            done();
+        }).catch(function () {
+            done(shouldBeFulfilled);
+        });
+    });
+});
+describe('when.while', function () {
+    it('should run callback until condition is false', function (done) {
+        var count = 3;
+        var str = '';
+        when.while(function () {
             str += count;
-            return --count > 0 ? count : false;
+            return delay(--count > 0 ? count : false);
+        }).then(function () {
+            assertNoThrow(done, assert.strictEqual, str, '321');
+            done();
+        }).catch(function () {
+            done(shouldBeFulfilled);
         });
-    }).then(function () {
-        start();
-        assert.strictEqual(str, '987654321');
-    }).catch(function () {
-        start();
-        assert.ok(false);
     });
 });
-
-/*
-QUnit.module('when.monitor');
-
-test("Uncaught exception event", function (assert) {
-    stop();
-    when([
-        delay(function () { throw err1; }),
-        delay(function () { throw err1; }),
-    ]);
-    when.once('uncaughtException', function (err) {
-        start();
-        assert.strictEqual(err, err1, "Without monitor");
-    });
-    when.monitor(function () {
-        return when([
-            delay(function () { throw err1; }),
-            delay(function () { throw err1; }),
+describe('uncaughtException event', function () {
+    it('should be emitted when exceptions is not handled', function (done) {
+        when.once('uncaughtException', function () {
+            done();
+        });
+        when([
+            delay(error),
+            delay(anotherError),
         ]);
-    }).once('uncaughtException', function (err) {
-        start();
-        assert.strictEqual(err, err1, "With monitor");
     });
 });
-*/
+describe('when.monitor', function () {
+    describe('uncaughtException event', function () {
+        it('should be emitted when exceptions is not handled', function (done) {
+            when.monitor(function () {
+                return when([
+                    delay(error),
+                    delay(anotherError),
+                ]);
+            }).once('uncaughtException', function () {
+                done();
+            });
+        });
+    });
+    describe('timeout event', function () {
+        this.slow(2000);
+        it('should be emitted when any promises does not fulfill or reject within given time', function (done) {
+            when.monitor({
+                timeout: 1000
+            }, function () {
+                return new Promise(function () { });
+            }).once('timeout', function () {
+                done();
+            });
+        });
+    });
+});

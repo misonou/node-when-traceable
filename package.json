@@ -3,7 +3,7 @@
   "version": "0.2.1",
   "main": "when.js",
   "scripts": {
-    "test": "qunit -c when:./when.js -t tests/tests.js"
+    "test": "mocha tests/tests.js"
   },
   "author": {
     "name": "misonou"
@@ -23,7 +23,7 @@
     "traceable": "^0.2.2"
   },
   "devDependencies": {
-    "qunit": "^0.9.1"
+    "mocha": "^3.0.2"
   },
   "maintainers": [
     {

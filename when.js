@@ -51,7 +51,9 @@ function emittify(obj) {
     if (typeof obj.emit !== 'function') {
         EventEmitter.call(obj);
         each(EventEmitter.prototype, function (i, v) {
-            obj[i] = v;
+            if (i !== 'constructor') {
+                obj[i] = v;
+            }
         });
     }
     return obj;
@@ -177,7 +179,7 @@ function reject(deferred, err, errorHandler, interceptor) {
         if (typeof errorHandler !== 'function') {
             errorHandler = errorHandler[err.code || err] || errorHandler.default || errorHandler;
         }
-        if (typeof errorHandler !== 'function') {
+        if (typeof errorHandler === 'string') {
             var nerr = new Error(err.message);
             Object.getOwnPropertyNames(err).forEach(function (prop) {
                 nerr[prop] = err[prop];
@@ -185,7 +187,7 @@ function reject(deferred, err, errorHandler, interceptor) {
             err = nerr;
             err.code = errorHandler;
             err.name = errorHandler;
-        } else {
+        } else if (typeof errorHandler === 'function') {
             var wrapperHandler = function () {
                 try {
                     return errorHandler.apply(this, arguments);
