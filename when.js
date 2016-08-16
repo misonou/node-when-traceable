@@ -11,7 +11,7 @@ function PromiseMonitor(promise, options, interceptor, reject) {
     this.id = options.id + '/' + (++options.promiseCount);
     this.options = options;
     this.promise = emittify(promise);
-    this.interceptor = interceptor || null;
+    this.interceptor = interceptor;
 
     if (reject && options.rejectOnTimeout) {
         promise.once('timeout', reject);
@@ -177,7 +177,7 @@ function reject(deferred, err, errorHandler, interceptor) {
     }
     if (errorHandler) {
         if (typeof errorHandler !== 'function') {
-            errorHandler = errorHandler[err.code || err] || errorHandler.default || errorHandler;
+            errorHandler = errorHandler[err.code || err.name] || errorHandler.default || errorHandler;
         }
         if (typeof errorHandler === 'string') {
             var nerr = new Error(err.message);
@@ -189,10 +189,15 @@ function reject(deferred, err, errorHandler, interceptor) {
             err.name = errorHandler;
         } else if (typeof errorHandler === 'function') {
             var wrapperHandler = function () {
+                // avoid calling the same error handler again when 
+                // synchronous exception is caught
                 try {
-                    return errorHandler.apply(this, arguments);
+                    var value = errorHandler.apply(this, arguments);
+                    if (value instanceof Error) {
+                        return reject(deferred, value, null, interceptor);
+                    }
+                    return value;
                 } catch (err) {
-                    // avoid sychronous exception calling the same error handler
                     reject(deferred, err, null, interceptor);
                 }
             };
@@ -309,7 +314,7 @@ function when(source, then, errorHandler) {
             return promise;
         }
         if (isThenable(source)) {
-            if (then || errorHandler || monitorOptions) {
+            if (then !== undefined || errorHandler !== undefined || monitorOptions) {
                 return watch(deferred, source, then, errorHandler), promise;
             }
             return source;
@@ -377,6 +382,17 @@ when.monitor = function (options, callback) {
 };
 
 when.map = function (arr, fn, then, errorHandler) {
+    if (isThenable(arr)) {
+        return when(arr, function (arr) {
+            if (arr === undefined || arr === null) {
+                return [];
+            }
+            if (!Array.isArray(arr)) {
+                arr = [arr];
+            }
+            return when.map(arr, fn, then, errorHandler);
+        });
+    }
     if (!Array.isArray(arr)) {
         throw new TypeError('The first argument must be an Array.');
     }
@@ -385,7 +401,11 @@ when.map = function (arr, fn, then, errorHandler) {
     }
     var i, len, promise = [];
     for (i = 0, len = arr.length; i < len; i++) {
-        promise[promise.length] = fn(arr[i], i);
+        if (isThenable(arr[i])) {
+            promise[promise.length] = when.map(arr[i], fn);
+        } else {
+            promise[promise.length] = fn(arr[i]);
+        }
     }
     promise = flatten(promise);
     for (i = 0, len = promise.length; i < len; i++) {
@@ -406,6 +426,11 @@ when.while = function (fn, then, errorHandler) {
 };
 
 when.forEach = function (arr, fn, then, errorHandler) {
+    if (isThenable(arr)) {
+        return when(arr, function (arr) {
+            return when.forEach(arr, fn, then, errorHandler);
+        });
+    }
     if (!Array.isArray(arr)) {
         throw new TypeError('The first argument must be an Array.');
     }
@@ -414,16 +439,20 @@ when.forEach = function (arr, fn, then, errorHandler) {
     }
     arr = arr.slice(0);
     var index = 0;
-    var promise = when(when.while(function () {
+    var resolve;
+    var promise = when(function (then) {
+        resolve = then();
+    }, then, errorHandler);
+    when.while(function () {
         if (index >= arr.length) {
-            return false;
+            return resolve(), false;
         }
         return when(function () {
-            return fn(arr[index++]), true;
+            return fn(arr[index++]) || true;
         }, function (err) {
             return unhandledException(promise, err), true;
         });
-    }), then, errorHandler);
+    });
     return promise;
 };
 
